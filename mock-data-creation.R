@@ -4,7 +4,6 @@
 # 2021-03-15
 
 ################################################################################
-# TODO: For ordinal variables, could modify prob parameter to match obs. means
 sample_size <- 100
 set.seed(seed = 20210315)
 
@@ -45,11 +44,11 @@ bounded_norm <- function(n, mean, sd, lower = -Inf, upper = Inf) {
 #' @param positive logical indicating if there is a positive relationship 
 #' between independent variable x and lambda (FALSE indicates negative 
 #' relationship)
-bounded_dep_pois <- function(n, i, old_range = c(-Inf, Inf), 
+bounded_dep_pois <- function(n, i, i_range = c(-Inf, Inf), 
                              lower = 0, upper = Inf, positive = TRUE) {
   # Find min & max for rescaling purposes
-  min_o <- min(old_range)
-  max_o <- max(old_range)
+  min_o <- min(i_range)
+  max_o <- max(i_range)
 
   # How to modify lambda? If a positive relationship, want to use positive 
   # modifier; if negative, use negative modifier
@@ -86,65 +85,25 @@ W1_dep <- bounded_norm(n = sample_size,
                        lower = 0,
                        upper = 56)
 
-# Look at education: slight negative relationship between Education and PRS
-# Higher education score, lower PRS, so want to modify probabilities of 
-# Education based on PRS score. PRS ranges -0.3 to 0.3, can make a vector of 
-# probabilities (prob argument of sample need not sum to one) of appropriate 
-# length (in Education case, length = 13)
-# Could use a Poisson distribution, modifying mean based on PRS score. If 
-# rpois is passed a vector of means (lambda), will only actually return n 
-# number of samples, where n is first argument passed to rpois. So will want to 
-# pass n the length of the lambda vector. e.g. rpois(n = length(l), lambda = l)
-# Mean of Education is 5.67, so if we treat this as independent of PRS, we can 
-# do
-Education <- rpois(n = sample_size,
-                   lambda = 5.67)
-
-# But if we want to nudge Education by PRS, we know PRS is between -0.3 and 0.3
-# AND that higher values of PRS result in lower values of Education. So we can 
-# use a transformation of PRS and addition to the value passed to lambda
-# lambda has to be > 0 (it can be zero, but it returns all 0)
-# Ed.     1 ----- 5.67 ------ 13
-# PRS    0.3 ----- x ------ -0.3 # Note reversal of scale
-
-min_n <- 1
-max_n <- 13
-
-min_o <- -0.3
-max_o <- 0.3
-
-# Rescale PRS to the variable of interest range
-# Use -1 * PRS because it is a negative relationship
-lambda <- ( (max_n - min_n) / (max_o - min_o) ) * (((-1) * PRS) - max_o) + max_n
-Ed <- rpois(n = length(lambda), lambda = lambda)
-plot(x = PRS, y = Ed)
-plot(x = PRS, y = lambda)
-
-Education <- bounded_dep_pois(n = sample_size,
-                              i = PRS, old_range = c(-0.3, 0.3),
-                              lower = 1, upper = 13, positive = FALSE)
-plot(x = PRS, y = Education)
-
 # Education (Mediator)
-Education <- sample(x = ordered(x = 1:13), 
-                    size = sample_size, 
-                    replace = TRUE)
+Education <- bounded_dep_pois(n = sample_size,
+                              i = PRS, i_range = c(-0.3, 0.3),
+                              lower = 1, upper = 13, positive = FALSE)
 
-# Health Insurance (Mediator)
-Health_ins <- bounded_norm(n = sample_size,
-                           mean = 9.25,
-                           sd = 4.599,
-                           lower = 0,
-                           upper = 12)
+# Health Insurance (Mediator) Cheating and treating as ordinal
+Health_ins <- bounded_dep_pois(n = sample_size,
+                               i = PRS, i_range = c(-0.3, 0.3),
+                               lower = 0, upper = 12, positive = FALSE)
 
 # Total assets (Mediator)
-Assets <- sample(x = ordered(x = 1:9),
-                 size = sample_size,
-                 replace = TRUE)
+Assets <- bounded_dep_pois(n = sample_size,
+                           i = PRS, i_range = c(-0.3, 0.3),
+                           lower = 1, upper = 9, positive = FALSE)
+
 # Debt (Mediator)
-Debt <- sample(x = ordered(x = 1:3),
-               size = sample_size,
-               replace = TRUE)
+Debt <- bounded_dep_pois(n = sample_size,
+                         i = PRS, i_range = c(-0.3, 0.3), 
+                         lower = 1, upper = 3)
 
 # Family information
 # 4533 are singletons (i.e. no known relatives in data set)
@@ -158,24 +117,21 @@ triads <- max(dyads) + rep(x = 1:27, times = 3)
 quads <- max(triads) + rep(x = 1:1, times = 4)
 FamilyID <- c(singletons, dyads, triads, quads)
 
-# Need to simulate dependent variable
-# Some correlation estimates between PRS and mediators:
-# Education: -0.115
-# Health_ins: -0.060
-# Assets: -0.084
-# Debt: 0.082
-# W4_dep ~ PRS + W1_dep + Education + Health_ins + Assets + Debt
+# Need to simulate dependent variable; generalizing with assumed positive 
+# and negative relationships
+W4_dep_raw <- PRS + W1_dep - Education - Health_ins - Assets + Debt
+# Finally, rescale W4_dep to a range of 0-15
+W4_dep <- ( (15 - 0) / (max(W4_dep_raw) - min(W4_dep_raw)) ) * 
+  (W4_dep_raw - max(W4_dep_raw)) + 15
 
-
-# W4_dep	W4_Dep
-# 2.64	2.57	dependent	Continuous	0-15
-
+# Make a single data frame to write to file
 mock_data <- data.frame(DepPRSIN = PRS,
                         CESDW1 = W1_dep,
                         H4ED2 = Education,
                         H4HS3 = Health_ins,
                         H4EC7 = Assets,
                         H4EC8 = Debt,
+                        W4_Dep = W4_dep,
                         FamilyID = sample(x = FamilyID, size = sample_size))
 
 write.csv(x = mock_data, file = "mock_data.csv", row.names = FALSE)
