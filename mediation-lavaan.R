@@ -18,33 +18,60 @@ library(lavaan)   # mediation analysis
 full_data <- readr::read_csv(file = data_file, 
                              col_types = cols()) # Suppresses messages
 
-# Cycle through resamples, storing results in results list object
-results <- list(nreps)
+# Testing a single analysis
+subset_data <- full_data %>%
+  group_by(FamilyID) %>%
+  sample_n(size = 1)
 
-for (i in 1:nreps) {
-  subset_data <- full_data %>%
-    group_by(FamilyID) %>%
-    sample_n(size = 1)
-  
-  mediation_model <- '
-  # Full model, with mediators, direct effect, and covariate
-  '
-  double_model <- '
-# Define the full model, which includes direct effect (X) and covariate (P1)
-  Y ~ b1 * M1 + b2 * M2 + c * X + P1
-# Regress mediators on X, including P as covariate
-  M1 ~ a1 * X
-  M2 ~ a2 * X
+mediation_model <- '
+# Full model, with mediators (b), direct effect (c), and covariate
+  W4_Dep ~ b1 * H4ED2+ b2 * H4HS3 + b3 * H4EC7 + b4 * H4EC8 + c * DepPRSIN + CESDW1
+# Regress mediators on X
+  H4ED2 ~ a1 * DepPRSIN
+  H4HS3 ~ a2 * DepPRSIN
+  H4EC7 ~ a3 * DepPRSIN
+  H4EC8 ~ a4 * DepPRSIN
 # Define additional parameters of interest to print
 # indirect effects (a*b)
   ab1 := a1 * b1
   ab2 := a2 * b2
-# direct effect (not defining, as it comes out in Regressions section)
-#  direct := c
+  ab3 := a3 * b3
+  ab4 := a4 * b4
 # total effect
-  total := c + (a1 * b1) + (a2 * b2)
-# If desired and warranted, can add covariance between variables
-# M1 ~~ M2
+  total := c + (a1 * b1) + (a2 * b2) + (a3 * b3) + (a4 * b4)
 '
-  
-}
+
+# This model fails to find a solution
+# Attempted fixes
+# parameterization = "theta"
+# estimator "ML" and variety of flavors
+# bounds = TRUE
+model_fit <- lavaan::sem(mediation_model, 
+                         data = subset_data)
+summary(model_fit)
+
+# A simpler model works
+simple_model <- '
+# Full model, with mediators (b), direct effect (c), and covariate
+  W4_Dep ~ b1 * H4ED2 + c * DepPRSIN + CESDW1
+# Regress mediators on X
+  H4ED2 ~ a1 * DepPRSIN
+# Define additional parameters of interest to print
+# indirect effects (a*b)
+  ab1 := a1 * b1
+# total effect
+  total := c + (a1 * b1)
+'
+simple_fit <- lavaan::sem(simple_model,
+                            data = subset_data)
+summary(simple_fit)
+
+# Cycle through resamples, storing results in results list object
+# results <- list(nreps)
+# 
+# for (i in 1:nreps) {
+#   subset_data <- full_data %>%
+#     group_by(FamilyID) %>%
+#     sample_n(size = 1)
+# }
+
