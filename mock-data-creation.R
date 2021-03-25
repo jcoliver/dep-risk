@@ -4,7 +4,7 @@
 # 2021-03-15
 
 ################################################################################
-sample_size <- 100
+sample_size <- 5690
 set.seed(seed = 20210315)
 
 #' Random generation for the normal distribution with lower and upper boundaries
@@ -125,6 +125,7 @@ W4_dep <- ( (15 - 0) / (max(W4_dep_raw) - min(W4_dep_raw)) ) *
   (W4_dep_raw - max(W4_dep_raw)) + 15
 
 # Make a single data frame to write to file
+# Sampling the FamilyID field so they are distributed across data frame
 mock_data <- data.frame(DepPRSIN = PRS,
                         CESDW1 = W1_dep,
                         H4ED2 = Education,
@@ -134,4 +135,4 @@ mock_data <- data.frame(DepPRSIN = PRS,
                         W4_Dep = W4_dep,
                         FamilyID = sample(x = FamilyID, size = sample_size))
 
-write.csv(x = mock_data, file = "mock_data.csv", row.names = FALSE)
+write.csv(x = mock_data, file = "data/mock_data.csv", row.names = FALSE)
