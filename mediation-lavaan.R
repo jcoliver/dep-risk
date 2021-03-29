@@ -6,8 +6,6 @@
 # Script settings
 # Location of file with data
 data_file <- "data/mock_data.csv"
-# Number of data resamples to run
-nreps <- 10
 
 # Load required libraries
 library(readr)    # read in files
@@ -46,6 +44,7 @@ mediation_model <- '
 # parameterization = "theta"
 # estimator "ML" and variety of flavors
 # bounds = TRUE
+# optim.method = "BFGS"
 model_fit <- lavaan::sem(mediation_model, 
                          data = subset_data)
 summary(model_fit)
@@ -64,14 +63,5 @@ simple_model <- '
 '
 simple_fit <- lavaan::sem(simple_model,
                             data = subset_data)
-summary(simple_fit)
-
-# Cycle through resamples, storing results in results list object
-# results <- list(nreps)
-# 
-# for (i in 1:nreps) {
-#   subset_data <- full_data %>%
-#     group_by(FamilyID) %>%
-#     sample_n(size = 1)
-# }
+estimates <- lavaan::parameterEstimates(simple_fit)
 
