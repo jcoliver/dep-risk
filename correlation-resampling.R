@@ -69,8 +69,8 @@ results_long <- corr_results %>%
 results_summary <- results_long %>%
   group_by(predictor) %>%
   summarize(mean_corr = mean(correlation),
-            lower_CI = quantile(x = correlation, probs = 0.05, names = FALSE),
-            upper_CI = quantile(x = correlation, probs = 0.95, names = FALSE))
+            lower_CI = quantile(x = correlation, probs = 0.025, names = FALSE),
+            upper_CI = quantile(x = correlation, probs = 0.975, names = FALSE))
 # Print results
 results_summary
 
