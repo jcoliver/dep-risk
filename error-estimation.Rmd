@@ -1,0 +1,257 @@
+---
+title: "Error estimation comparison"
+author: "Jeff Oliver"
+date: "April 22, 2022"
+output: pdf_document
+---
+
+```{r fig-size, echo = FALSE}
+knitr::opts_chunk$set(fig.height=3) 
+```
+
+
+The goal is to compare error estimates of three different approaches:
+
+1. Resampling one individual from a pair of siblings and running simple 
+correlations
+2. Using OLS with family ID as a fixed effect
+3. Usine a linear mixed-effect with family ID as a random intercept effect
+
+The first two use data based on family-differenced scores, where a score for an 
+individual is mean-deviated. i.e. the score for the *i*<super>th</super> 
+individual is the observed value minus the family mean:
+
+$$
+z_i = x_i - \mu
+$$
+
+The third approach uses the untransformed data.
+
+We use a few additional libraries for analysis (fixest, nlme) and data 
+wrangling (dplyr). The ggplot2 library is useful for some eyeball diagnostics.
+
+```{r load-libraries}
+library(fixest)
+library(nlme)
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+```
+
+For the basis to these tests, we will focus on the mock data set, using health 
+insurance (`H4HS3` in the mock data) as the "outcome" and PRS as the predictor.
+
+# Setup: Data filtering and mean deviating
+
+## Restriction sibling pairs
+
+For these analyses, we only want to look at pairs of individuals (no singletons
+or triplets, etc.).
+
+```{r filter-pairs}
+raw_data <- read.csv(file = "data/mock_data.csv")
+# Retain only those columns of interest
+raw_data <- raw_data %>%
+  select(DepPRSIN, H4HS3, FamilyID)
+# Restrict data to only sibling PAIRS
+raw_data <- raw_data %>%
+  group_by(FamilyID) %>%      # Group by family ID
+  mutate(num_sibs = n()) %>%  # Count number of members of family
+  ungroup() %>%
+  filter(num_sibs == 2) %>%   # Keep only those with two members
+  select(-num_sibs)           # Drop num_sibs column
+```
+
+## Mean deviating
+
+The first two analyses require us to mean deviate scores for each individual. 
+
+```{r mean-deviate}
+z_data <- raw_data %>%
+  group_by(FamilyID) %>%
+  mutate(Z_PRS = DepPRSIN - mean(DepPRSIN),
+         Z_H4HS3 = H4HS3 - mean(H4HS3)) %>%
+  select(-DepPRSIN, -H4HS3) %>%
+  ungroup()
+```
+
+# Approach 1: Resampling
+
+In this approach, we sample one individual from each family (cutting the data 
+set in half) and run a correlation test between the two variables. The process 
+is repeated and values for statistics of interest are recorded for each 
+replicate.
+
+```{r resampling}
+nreps <- 100
+
+# A data frame that will hold results for each replicate
+sampled_ci <- data.frame(replicate = 1:nreps,
+                         rsq = NA,
+                         lower = NA,
+                         upper = NA,
+                         t_stat = NA)
+for (i in 1:nreps) {
+  # Randomly sample one sibling from each family
+  sampled_data <- z_data %>%
+    group_by(FamilyID) %>%
+    slice_sample(n = 1)
+  # Run correlation test on one sample
+  sampled_cor <- cor.test(x = sampled_data$Z_H4HS3,
+                          y = sampled_data$Z_PRS)
+  
+  # Extract r2 and the upper and lower of the 95% CI
+  sampled_ci$rsq[i] <- sampled_cor$estimate
+  sampled_ci$lower[i] <- sampled_cor$conf.int[1]
+  sampled_ci$upper[i] <- sampled_cor$conf.int[2]
+  sampled_ci$t_stat[i] <- sampled_cor$statistic[1]
+}
+# Report back average of correlation coefficient and the mean for confidence
+# intervals
+mean_rsq <- mean(sampled_ci$rsq)
+mean_lower <- mean(sampled_ci$lower)
+mean_upper <- mean(sampled_ci$upper)
+mean_t <- mean(sampled_ci$t_stat)
+```
+
+$r^2$ from resampling (95% CI): `r mean_rsq` (`r mean_lower`, `r mean_upper`)
+
+Mean $t$: `r mean_t`
+
+We can also plot the results for each of the replicates to see how the values 
+vary among replicates:
+
+```{r plot-resamples}
+resample_plot <- ggplot(data = sampled_ci, 
+                        mapping = aes(x = as.factor(replicate), y = rsq)) +
+  geom_point() + 
+  geom_errorbar(mapping = aes(ymin = lower, ymax = upper),
+                size = 0.2) +
+  xlab(label = "Replicate") +
+  ylab(label = expression(r^2)) +
+  theme_bw() + 
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+print(resample_plot)
+```
+
+## Aside: why variation?
+
+The plot above begs the question: if all observations for a family are 
+effectively "mirrors" of one another, why is there any variation among 
+replicates? Perhaps, slight differences among the loadings (i.e. how many 
+times we sample the sibling with the observed value *below* the family mean 
+versus the sibling with the observed value *above* the family mean) make 
+parameter estimates in each run a little different. Consider how the Pearson 
+correlation coefficient is calculated:
+
+$$
+r_{XY} = \frac{Cov(X, Y)}{\sigma_X \sigma_Y}
+$$
+
+So we can test to see which, if any, part of the equation above is different 
+between a pair of resampled data sets.
+
+```{r calc-r}
+# Here we make two resampled data sets
+sample_a <- z_data %>%
+    group_by(FamilyID) %>%
+    slice_sample(n = 1)
+
+sample_b <- z_data %>%
+    group_by(FamilyID) %>%
+    slice_sample(n = 1)
+
+# Covariance for sample A
+covar_a <- round(cov(x = sample_a$Z_H4HS3,
+                     y = sample_a$Z_PRS),
+                 digits = 6)
+# Covariance for sample B
+covar_b <- round(cov(x = sample_b$Z_H4HS3,
+                     y = sample_b$Z_PRS),
+                 digits = 6)
+
+# SD of X for sample A
+sd_x_a <- round(sd(sample_a$Z_H4HS3),
+                digits = 6)
+
+# SD of Y for sample A
+sd_y_a <- round(sd(sample_a$Z_PRS),
+                digits = 6)
+
+# SD of X for sample B
+sd_x_b <- round(sd(sample_b$Z_H4HS3),
+                digits = 6)
+
+# SD of Y for sample B
+sd_y_b <- round(sd(sample_b$Z_PRS),
+                digits = 6)
+
+# Calculate r "manually"
+r_a <- round(covar_a / (sd_x_a * sd_y_a),
+             digits = 6)
+r_b <- round(covar_b / (sd_x_b * sd_y_b),
+             digits = 6)
+
+# Calculate differences for table
+covar_diff <- covar_a - covar_b
+sd_x_diff <- sd_x_a - sd_x_b
+sd_y_diff <- sd_y_a - sd_y_b
+r_diff <- r_a - r_b
+```
+
+Considering two resampled data sets (arbitrarily "A" and "B"):
+
+| Sample | $Cov(X, Y)$ | $\sigma_X$ | $\sigma_Y$ | $r_{XY}$ |
+|:-|-:|-:|-:|-:|
+| A | `r covar_a` | `r sd_x_a` | `r sd_y_a` | `r r_a` |
+| B | `r covar_b` | `r sd_x_b` | `r sd_y_b` | `r r_b` |
+| $\Delta$ | `r covar_diff` | `r sd_x_diff` | `r sd_y_diff` | `r r_diff` |
+
+Although not massive, we *do* see differences among the data sets in both the 
+numerator (the covariance), the denominator (standard deviations), and the 
+resulting correlation coefficient. We leave it to the reader to investigate the 
+math further.
+
+# Approach 2: Fixed effects
+
+The second approach also uses the mean-differenced data, and uses family ID as
+a fixed effect.
+
+```{r fixed-effects}
+fixed_ins <- feols(fml = Z_H4HS3 ~ Z_PRS | FamilyID,
+                   data = z_data)
+etable(fixed_ins)
+```
+```{r fixed-effects-summary}
+summary(fixed_ins)
+```
+
+We can compare results from the fixest package (above) with the linear model of
+R:
+
+```{r lm}
+lm_ins <- lm(formula = Z_H4HS3 ~ Z_PRS + FamilyID,
+             data = z_data)
+summary(lm_ins)
+```
+And we see that both the OLS fixed-effects model and the linear model have 
+identical (or nearly so) estimates for the effect of PRS on our outcome 
+variable. The R-squared between the models are also the same; however, the 
+error from the OLS is more conservative than the linear regression model.
+
+
+# Approach 3: Mixed-effects model
+
+A third option, which operates on the raw data, uses Family ID as a *random* 
+intercept effect. The draw (to me, at least) of this approach is that it (1) 
+does not require mean-deviating the data and (2) easily accommodates families 
+with more than two siblings. Because the data are different from the prior two 
+analyses, it is not straightforward to compare the results.
+
+```{r lme}
+mixed_ins <- lme(H4HS3 ~ DepPRSIN, 
+                 random = ~ 1|FamilyID,
+                 data = raw_data,
+                 correlation = corAR1())
+summary(mixed_ins)
+```
